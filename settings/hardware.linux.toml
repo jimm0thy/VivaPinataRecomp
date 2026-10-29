@@ -3,14 +3,22 @@
 # Loaded after hardware.toml and mapping.toml and before launcher.toml on
 # Linux only (utils::LoadSettingsFiles). Flat key = value, no [Section].
 #
-# Linux has no Direct3D 12, so the default "Fast" render mode is Vulkan with
-# the host GPU's render targets (FBO) and fast resolve readback. The
-# launcher's "Accurate" mode (Vulkan fragment shader interlock) writes its own
-# values to launcher.toml, which loads after this file.
+# Linux has no Direct3D 12, so both render modes are Vulkan. The default is
+# the launcher's "Accurate" mode: the Xbox 360 EDRAM emulated exactly with
+# fragment shader interlock (the same values the launcher writes for it).
+# "Fast" (render_target_path_vulkan = "fbo") is hidden on Linux: it loses the
+# Vulkan device on NVIDIA during the intro movie.
 
 graphics_backend = "vulkan"
-render_target_path_vulkan = "fbo"
-readback_resolve = "fast"
+render_target_path_vulkan = "fsi"
+readback_resolve = "lazy"
+edram_interlock_optimizations = true
+vulkan_allow_present_mode_immediate = false
 
 # XInput is Windows only; SDL reads Xbox, PlayStation and most other pads.
 input_backend = "sdl"
+
+# Faster saving/loading: the game yields once per record while building save
+# data, which the emulator turned into a 0.1 ms sleep each (15-20 s saves).
+# src/game_fixes.h section 2. Set to false for the original behaviour.
+vp_fast_save = true

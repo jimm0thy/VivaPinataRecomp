@@ -47,6 +47,9 @@
 
 #include <cstdint>
 #include <cstring>
+#if !defined(_WIN32)
+#include <sched.h>
+#endif
 
 #include "game_constants.h"
 #include "game_cvars.h"
@@ -55,7 +58,8 @@
 // ---------------------------------------------------------------------------
 // 0. Status
 // ---------------------------------------------------------------------------
-// Guest overrides so far: section 1 (vpkd3d128 codegen workaround).
+// Guest overrides so far: section 1 (vpkd3d128 codegen workaround),
+// section 2 (record counting without a Sleep(0) per record).
 // Every address must come from generated/default/*_recomp.N.cpp or from a
 // runtime log, never from TiP-Recomp (different XEX).
 //
@@ -115,3 +119,50 @@ void VpFixVpkd3d128Float16x4(PPCVRegister& v0, PPCFPSCRRegister& fpscr) {
   v0.u16[5] = VpF32ToF16Xenos(z);
   v0.u16[4] = VpF32ToF16Xenos(w);
 }
+
+// ---------------------------------------------------------------------------
+// 2. sub_821FA490 without the per-record Sleep(0) (slow save / load)
+// ---------------------------------------------------------------------------
+// sub_821FA490(list, out_total_size) walks a packed record list (+0 nonzero =
+// a record, +8 = its size) and returns the count, calling Sleep(0) once per
+// record. sub_821FA508 calls it every time it appends a record, so building
+// a save of n records costs ~n^2/2 Sleep(0) calls (~125k for a garden).
+//
+// On the console Sleep(0) is a ~1 us yield. The SDK's KeDelayExecutionThread
+// turns a zero delay on a below-normal-priority thread (the main thread here)
+// into a 100 us nanosleep (~150 us with timer slack), which made every save
+// and load take 15-20 s with the main thread (and the music) stalled.
+//
+// Same walk, same stores to *out_total_size, same return value; the Sleep(0)
+// becomes a plain yield as on the console. The record data is not touched.
+// vp_fast_save = false runs the original recompiled body.
+REX_HOOK_RAW(sub_821FA490) {
+  if (!REXCVAR_GET(vp_fast_save)) {
+    __imp__sub_821FA490(ctx, base);
+    return;
+  }
+  REX_FUNC_PROLOGUE();
+  const uint32_t out = ctx.r4.u32;
+  uint32_t node = ctx.r3.u32;
+  uint32_t count = 0;
+  if (out != 0) {
+    REX_STORE_U32(out, 0);
+  }
+  while (static_cast<int32_t>(REX_LOAD_U32(node + 0)) != 0) {
+#if defined(_WIN32)
+    SwitchToThread();  // [VivaPinata Fix] was Sleep(0) (sub_826B2ED8)
+#else
+    sched_yield();  // [VivaPinata Fix] was Sleep(0) (sub_826B2ED8)
+#endif
+    const uint32_t size = REX_LOAD_U32(node + 8);
+    if (out != 0) {
+      REX_STORE_U32(out, REX_LOAD_U32(out) + size);
+    }
+    ++count;
+    node += size;
+  }
+  ctx.r11.u64 = 0;
+  ctx.cr6.compare<int32_t>(0, 0, ctx.xer);
+  ctx.r3.u64 = count;
+}
+

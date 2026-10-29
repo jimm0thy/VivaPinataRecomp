@@ -21,6 +21,11 @@ REXCVAR_DEFINE_BOOL(vp_fps_unlock, false, "Gameplay",
 REXCVAR_DEFINE_BOOL(vp_skip_intro_videos, false, "Gameplay",
                     "Skip the startup logo/intro movies (requires the SkipIntroVideos hook addresses)");
 
+// src/game_fixes.h section 2: no Sleep(0) per record while building save /
+// load data (each was a 100 us sleep on Linux; saves took 15-20 s).
+REXCVAR_DEFINE_BOOL(vp_fast_save, true, "Performance",
+                    "Skip the per-record Sleep(0) in sub_821FA490 (faster saving and loading)");
+
 REXCVAR_DEFINE_BOOL(vp_high_res_timer, true, "Performance",
                     "timeBeginPeriod(1) at startup so guest Sleep(1) is not quantised to 15.6 ms");
 
@@ -37,6 +42,13 @@ REXCVAR_DEFINE_STRING(vp_launcher_language, "auto", "UI", "Launcher language: au
 // ZoG Team translation) over english.bnl / englishus.bnl before launch.
 REXCVAR_DEFINE_STRING(vp_language, "en", "Gameplay", "Game text language: en, ru")
     .allowed({"en", "ru"});
+
+// src/input_mode.h: who owns the mouse. "auto" releases it when a controller
+// is used and captures it again on a click or a game key.
+REXCVAR_DEFINE_STRING(vp_input_mode, "auto", "Input",
+                      "Mouse capture: auto (released while a controller is used), kbm (always "
+                      "captured for the camera), controller (never captured)")
+    .allowed({"auto", "kbm", "controller"});
 
 REXCVAR_DEFINE_BOOL(dev_debug_runtime, false, "Debug",
                     "Enable runtime debug tools (stub sweep, missing function scan)");

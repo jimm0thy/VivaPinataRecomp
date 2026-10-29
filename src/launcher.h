@@ -49,8 +49,10 @@
 // The GPU API of the launcher's Fast render mode (see kRenderModes).
 #if defined(_WIN32)
 #define VP_FAST_API "D3D12"
+#define VP_PLATFORM_NAME "Windows"
 #else
 #define VP_FAST_API "Vulkan"
+#define VP_PLATFORM_NAME "Linux"
 #endif
 
 #include <imgui.h>
@@ -692,6 +694,16 @@ namespace vp_launcher
   inline bool MigrateLegacyRenderMode(const std::filesystem::path &launcher_toml)
   {
     LauncherSettings settings(launcher_toml);
+#if !defined(_WIN32)
+    // Linux offers only Accurate: a launcher.toml that still picks Fast
+    // (render_target_path_vulkan = "fbo") is switched over.
+    if (settings.Get("render_target_path_vulkan") == "\"fbo\"")
+    {
+      REXLOG_INFO("launcher: Fast mode is not available on Linux, using Accurate");
+      ApplyRenderMode(settings, 1, false);
+      return true;
+    }
+#endif
     if (settings.Get("render_target_path_d3d12") != "\"rov\"" ||
         !settings.Get("edram_interlock_optimizations").empty())
     {
@@ -815,7 +827,11 @@ namespace vp_launcher
     const char *render_mode;
     const char *path[2];
     const char *path_note;
+    const char *anisotropic;
+    const char *anisotropic_levels[6];
     const char *precise_timer;
+    const char *controls;
+    const char *controls_mode[3];
     const char *launcher_language;
     const char *language_auto;
     const char *saved_to;
@@ -823,7 +839,7 @@ namespace vp_launcher
   };
 
   inline constexpr UiText kTextEn{
-      .subtitle = "Native Windows version · recompiled from Xbox 360",
+      .subtitle = "Native " VP_PLATFORM_NAME " version · recompiled from Xbox 360",
       .status_ok = "Game found: Viva Pinata (USA, Europe), correct version",
       .status_other = "A different default.xex was found: the game may not start",
       .status_missing = "Game files not found",
@@ -853,15 +869,20 @@ namespace vp_launcher
                "Accurate (Vulkan, exact EDRAM) — the exact Xbox 360 picture"},
       .path_note = "Accurate emulates the Xbox 360 video memory exactly and needs a stronger GPU (an RX 6600 "
                    "holds the game's 30 FPS). Changing between the modes restarts the game once.",
+      .anisotropic = "Anisotropic filtering",
+      .anisotropic_levels = {"Game default", "Off", "2x", "4x", "8x", "16x"},
       .precise_timer = "Precise system timer (1 ms)",
+      .controls = "Controls (mouse capture)",
+      .controls_mode = {"Auto: release the mouse when a controller is used", "Keyboard + mouse",
+                        "Controller: never capture the mouse"},
       .launcher_language = "Launcher language",
-      .language_auto = "Auto (Windows language)",
+      .language_auto = "Auto (" VP_PLATFORM_NAME " language)",
       .saved_to = "Saved to settings/launcher.toml, which overrides hardware.toml",
       .done = "Done",
   };
 
   inline constexpr UiText kTextRu{
-      .subtitle = "Нативная версия для Windows · рекомпиляция с Xbox 360",
+      .subtitle = "Нативная версия для " VP_PLATFORM_NAME " · рекомпиляция с Xbox 360",
       .status_ok = "Игра найдена: Viva Pinata (USA, Europe), версия подходит",
       .status_other = "Найдена другая версия default.xex: игра может не запуститься",
       .status_missing = "Файлы игры не найдены",
@@ -891,9 +912,14 @@ namespace vp_launcher
                "Точный (Vulkan, точная EDRAM) — картинка как на Xbox 360"},
       .path_note = "Точный режим в точности эмулирует видеопамять Xbox 360 и требует видеокарту мощнее "
                    "(RX 6600 держит игровые 30 кадров/с). При смене режима игра один раз перезапустится.",
+      .anisotropic = "Анизотропная фильтрация",
+      .anisotropic_levels = {"Как в игре", "Выкл", "2x", "4x", "8x", "16x"},
       .precise_timer = "Точный системный таймер (1 мс)",
+      .controls = "Управление (захват мыши)",
+      .controls_mode = {"Авто: отпускать мышь при игре на геймпаде", "Клавиатура + мышь",
+                        "Геймпад: не захватывать мышь"},
       .launcher_language = "Язык лаунчера",
-      .language_auto = "Авто (язык Windows)",
+      .language_auto = "Авто (язык " VP_PLATFORM_NAME ")",
       .saved_to = "Сохраняется в settings/launcher.toml, он важнее hardware.toml",
       .done = "Готово",
   };
@@ -1288,25 +1314,56 @@ namespace vp_launcher
 
         ImGui::SeparatorText(ui.section_graphics);
         ImGui::TextUnformatted(ui.render_mode);
-        int mode = RenderModeIndex();
         constexpr float kModeWidth = 500.0f;  // the mode names are long
+#if defined(_WIN32)
+        int mode = RenderModeIndex();
         ImGui::SetNextItemWidth(kModeWidth);
         if (ImGui::Combo("##render_mode", &mode, ui.path, IM_ARRAYSIZE(ui.path)))
         {
           ApplyRenderMode(settings_, mode, true);
         }
+#else
+        // Linux: Fast (Vulkan host render targets) loses the device on NVIDIA
+        // in the intro movie, so only Accurate is offered.
+        ImGui::TextDisabled("%s", ui.path[1]);
+#endif
         {
           FontScope caption(fonts.caption);
           ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + kModeWidth);
           ImGui::TextDisabled("%s", ui.path_note);
           ImGui::PopTextWrapPos();
         }
+        // anisotropic_override: -1 game default, 0 off, 1 = 1x (same as off),
+        // 2..5 = 2x..16x. Applies at once (hot reload).
+        ImGui::TextUnformatted(ui.anisotropic);
+        static constexpr int32_t kAnisotropicValues[] = {-1, 0, 2, 3, 4, 5};
+        const int32_t aniso = rex::cvar::Query<int32_t>("anisotropic_override");
+        int aniso_index = aniso < 0 ? 0 : aniso <= 1 ? 1 : std::min<int32_t>(aniso, 5);
+        ImGui::SetNextItemWidth(kItemWidth);
+        if (ImGui::Combo("##anisotropic_override", &aniso_index, ui.anisotropic_levels,
+                         IM_ARRAYSIZE(ui.anisotropic_levels)))
+        {
+          settings_.Set("anisotropic_override", std::to_string(kAnisotropicValues[aniso_index]));
+        }
 
         ImGui::SeparatorText(ui.section_system);
+#if defined(_WIN32)
+        // timeBeginPeriod(1): Windows only; Linux sleeps are already precise.
         bool timer = REXCVAR_GET(vp_high_res_timer);
         if (ImGui::Checkbox(ui.precise_timer, &timer))
         {
           settings_.Set("vp_high_res_timer", BoolLiteral(timer));
+        }
+#endif
+        ImGui::TextUnformatted(ui.controls);
+        static constexpr const char *kInputModes[] = {"auto", "kbm", "controller"};
+        const std::string &input_mode = REXCVAR_GET(vp_input_mode);
+        int input_index = input_mode == "kbm" ? 1 : input_mode == "controller" ? 2 : 0;
+        ImGui::SetNextItemWidth(kModeWidth);
+        if (ImGui::Combo("##vp_input_mode", &input_index, ui.controls_mode,
+                         IM_ARRAYSIZE(ui.controls_mode)))
+        {
+          settings_.Set("vp_input_mode", std::string("\"") + kInputModes[input_index] + "\"");
         }
 
         ImGui::SeparatorText(ui.section_launcher);
