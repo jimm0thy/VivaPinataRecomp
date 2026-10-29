@@ -1,0 +1,36 @@
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+index b3d9d68..1ca7ad3 100644
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -76,7 +76,22 @@ REXCVAR_DEFINE_BOOL(vulkan_dynamic_rendering, true, "GPU/Vulkan",
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
+ // ROV research (REX_VK_SYNC_STATS): the module base for return addresses.
++#if defined(_WIN32)
+ extern "C" char __ImageBase;
++static uintptr_t RexSyncStatsModuleBase() { return uintptr_t(&__ImageBase); }
++#else
++// __ImageBase is a PE linker symbol; on ELF ask the dynamic loader instead.
++#include <dlfcn.h>
++static uintptr_t RexSyncStatsModuleBase() {
++  static const uintptr_t base = [] {
++    Dl_info info{};
++    return dladdr(reinterpret_cast<void*>(&RexSyncStatsModuleBase), &info)
++               ? uintptr_t(info.dli_fbase)
++               : uintptr_t(0);
++  }();
++  return base;
++}
++#endif
+ 
+ namespace rex::graphics::vulkan {
+ 
+@@ -5472,7 +5487,7 @@ void VulkanCommandProcessor::CheckSubmissionFenceAndDeviceLoss(uint64_t await_su
+       static std::map<uintptr_t, SyncSite> sites;
+       static auto report_since = std::chrono::steady_clock::now();
+       const auto now = std::chrono::steady_clock::now();
+-      SyncSite& site = sites[uintptr_t(__builtin_return_address(0)) - uintptr_t(&__ImageBase)];
++      SyncSite& site = sites[uintptr_t(__builtin_return_address(0)) - RexSyncStatsModuleBase()];
+       ++site.count;
+       site.ms += std::chrono::duration<double, std::milli>(now - wait_start).count();
+       const double window = std::chrono::duration<double>(now - report_since).count();

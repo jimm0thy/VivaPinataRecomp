@@ -29,6 +29,6 @@ Local changes on branch `linux-port`, on top of upstream a510fc7:
 - `CMakeLists.txt`, `CMakeUserPresets.json`: use the SDK fork built from
   source (`rexglue/linux-amd64/.vp-source-build`), plain `clang`/`clang++`.
 
-Build with `../build-linux.sh`, make the portable folder with
-`../package-linux.sh ~/Games/VivaPinata`, add the menu entry with
-`../add-vivapinata-shortcut.sh`.
+- `linux/`: build, run and packaging scripts, the menu-entry script and the
+  SDK patch (`sdk-patches/`: `__ImageBase` replaced with `dladdr` on Linux in
+  `vulkan/command_processor.cpp`). How to build and play: `linux/README.md`.
