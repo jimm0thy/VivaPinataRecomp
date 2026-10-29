@@ -635,6 +635,13 @@ namespace vp_tools
         SetOpen(false);
       }
       b_down_ = b;
+#else
+      // Linux: F1 through ImGui (keys arrive only while the window has
+      // focus). The Back-button hold needs XInput and is Windows only.
+      if (ImGui::IsKeyPressed(ImGuiKey_F1, false))
+      {
+        SetOpen(!open_);
+      }
 #endif
       if (open_ && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
       {

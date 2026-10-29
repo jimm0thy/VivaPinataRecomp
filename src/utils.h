@@ -38,7 +38,14 @@ namespace utils
   {
     namespace fs = std::filesystem;
     fs::path dir = SettingsDir();
-    for (const char *file : {"hardware.toml", "mapping.toml", "launcher.toml"})
+    // hardware.linux.toml: Linux overrides of the Windows defaults (Vulkan
+    // instead of Direct3D 12, SDL input instead of XInput). It loads before
+    // launcher.toml so the launcher's choices still win.
+    for (const char *file : {"hardware.toml", "mapping.toml",
+#if !defined(_WIN32)
+                             "hardware.linux.toml",
+#endif
+                             "launcher.toml"})
     {
       if (fs::path p = dir / file; fs::exists(p))
       {

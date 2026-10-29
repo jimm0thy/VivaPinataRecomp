@@ -8,11 +8,20 @@
                 "CMAKE_PREFIX_PATH": "rexglue/win-amd64"
             }
         },
+        {
+            "name": "user-env-linux",
+            "hidden": true,
+            "cacheVariables": {
+                "CMAKE_PREFIX_PATH": "${sourceDir}/rexglue/linux-amd64",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        },
         { "name": "local-win-debug", "inherits": ["win-amd64-debug", "user-env"] },
         { "name": "local-win-release", "inherits": ["win-amd64-release", "user-env"] },
         { "name": "local-win-relwithdebinfo", "inherits": ["win-amd64-relwithdebinfo", "user-env"] },
-        { "name": "local-lin-debug", "inherits": ["linux-amd64-debug", "user-env"] },
-        { "name": "local-lin-release", "inherits": ["linux-amd64-release", "user-env"] },
-        { "name": "local-lin-relwithdebinfo", "inherits": ["linux-amd64-relwithdebinfo", "user-env"] }
+        { "name": "local-lin-debug", "inherits": ["user-env-linux", "linux-amd64-debug"] },
+        { "name": "local-lin-release", "inherits": ["user-env-linux", "linux-amd64-release"] },
+        { "name": "local-lin-relwithdebinfo", "inherits": ["user-env-linux", "linux-amd64-relwithdebinfo"] }
     ]
 }

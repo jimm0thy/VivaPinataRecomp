@@ -75,8 +75,13 @@ public:
     utils::LoadSettingsFiles();
 
     // Native XInput avoids SDL controller-mapping surprises on Windows;
-    // settings/mapping.toml can still override input_backend.
+    // settings/mapping.toml can still override input_backend. Linux has no
+    // XInput, so it always uses SDL.
+#if defined(_WIN32)
     REXCVAR_SET(input_backend, "xinput");
+#else
+    REXCVAR_SET(input_backend, "sdl");
+#endif
 
     std::string backend = REXCVAR_GET(graphics_backend);
     vp_launcher::ActiveBackend() = backend;

@@ -521,6 +521,12 @@ namespace vp_tools
         open_ = !open_;
       }
       f2_down_ = f2;
+#else
+      // ImGui receives SDL key events only while the window has focus.
+      if (ImGui::IsKeyPressed(ImGuiKey_F2, false))
+      {
+        open_ = !open_;
+      }
 #endif
     }
 

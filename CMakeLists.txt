@@ -49,6 +49,17 @@ if(REXSDK_RELEASE_URL_OVERRIDE)
     set(REXSDK_RELEASE_URL "${REXSDK_RELEASE_URL_OVERRIDE}")
 endif()
 
+# Linux port: the fork publishes no Linux SDK, so build-linux.sh builds the
+# same fork commit (717fbdf) from source and installs it into
+# rexglue/<platform>, leaving a marker file. With the marker present, that
+# SDK is used as is and nothing is downloaded.
+set(REXSDK_LOCAL_MARKER "${CMAKE_CURRENT_SOURCE_DIR}/rexglue/${REXSDK_PLATFORM}/.vp-source-build")
+if(EXISTS "${REXSDK_LOCAL_MARKER}")
+    file(READ "${REXSDK_LOCAL_MARKER}" REXSDK_LOCAL_INFO)
+    string(STRIP "${REXSDK_LOCAL_INFO}" REXSDK_LOCAL_INFO)
+    message(STATUS "[vivapinata] Using the ReXGlue SDK built from source: ${REXSDK_LOCAL_INFO}")
+    list(PREPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/rexglue/${REXSDK_PLATFORM}")
+else()
 execute_process(
     COMMAND ${CMAKE_COMMAND}
             "-DREXSDK_VERSION=${REXSDK_VERSION}"
@@ -58,6 +69,7 @@ execute_process(
     RESULT_VARIABLE REXSDK_FETCH_RESULT)
 if(NOT REXSDK_FETCH_RESULT EQUAL 0)
     message(FATAL_ERROR "ReXGlue SDK ${REXSDK_VERSION} could not be fetched (see above)")
+endif()
 endif()
 
 # generated/rexglue.cmake treats a non-empty REXSDK_VERSION as an EXACT

@@ -40,6 +40,17 @@
 #include <windows.h>
 #include <bcrypt.h>
 #pragma comment(lib, "bcrypt.lib")
+#else
+#include <cstdlib>
+#include <string_view>
+#include <unistd.h>
+#endif
+
+// The GPU API of the launcher's Fast render mode (see kRenderModes).
+#if defined(_WIN32)
+#define VP_FAST_API "D3D12"
+#else
+#define VP_FAST_API "Vulkan"
 #endif
 
 #include <imgui.h>
@@ -117,7 +128,65 @@ namespace vp_launcher
     fonts.button = add("seguisb.ttf", 26.0f);
     fonts.title = add("segoeuib.ttf", 40.0f);
 #else
-    (void)atlas;
+    // Linux: no Segoe UI. Use the first installed sans family that has
+    // regular, semibold and bold faces with Cyrillic (Noto Sans, then
+    // DejaVu Sans, then Liberation Sans). Missing faces fall back to regular.
+    static const ImWchar kRanges[] = {
+        0x0020, 0x00FF,  // Basic Latin + Latin-1 (ñ, ×, ·)
+        0x0400, 0x04FF,  // Cyrillic
+        0x2013, 0x2026,  // dashes, quotes, bullet, ellipsis
+        0,
+    };
+    struct Family
+    {
+      const char *regular;
+      const char *semibold;
+      const char *bold;
+    };
+    static const Family kFamilies[] = {
+        {"/usr/share/fonts/noto/NotoSans-Regular.ttf", "/usr/share/fonts/noto/NotoSans-SemiBold.ttf",
+         "/usr/share/fonts/noto/NotoSans-Bold.ttf"},
+        {"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+         "/usr/share/fonts/truetype/noto/NotoSans-SemiBold.ttf",
+         "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"},
+        {"/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+         "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"},
+        {"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"},
+        {"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+         "/usr/share/fonts/liberation/LiberationSans-Bold.ttf",
+         "/usr/share/fonts/liberation/LiberationSans-Bold.ttf"},
+    };
+    auto exists = [](const char *path) {
+      std::error_code ec;
+      return std::filesystem::exists(path, ec);
+    };
+    const Family *family = nullptr;
+    for (const Family &f : kFamilies)
+    {
+      if (exists(f.regular))
+      {
+        family = &f;
+        break;
+      }
+    }
+    if (!family)
+    {
+      REXLOG_WARN("launcher: no Noto/DejaVu/Liberation Sans found, using the built-in font");
+      return;
+    }
+    auto add = [&](const char *path, float size) -> ImFont * {
+      ImFontConfig config;
+      config.OversampleH = 2;
+      config.OversampleV = 1;
+      return atlas->AddFontFromFileTTF(exists(path) ? path : family->regular, size, &config, kRanges);
+    };
+    Fonts &fonts = GetFonts();
+    fonts.body = add(family->regular, 20.0f);
+    fonts.caption = add(family->regular, 16.0f);
+    fonts.button = add(family->semibold, 26.0f);
+    fonts.title = add(family->bold, 40.0f);
 #endif
   }
 
@@ -198,7 +267,119 @@ namespace vp_launcher
     }
     BCryptCloseAlgorithmProvider(alg, 0);
 #else
-    (void)file;
+    // Portable SHA-1 (FIPS 180-4) for the version check; no crypto library
+    // dependency.
+    std::ifstream in(file, std::ios::binary);
+    if (!in)
+    {
+      return result;
+    }
+    uint32_t h[5] = {0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u};
+    auto rotl = [](uint32_t x, int n) { return (x << n) | (x >> (32 - n)); };
+    auto block = [&](const unsigned char *p) {
+      uint32_t w[80];
+      for (int i = 0; i < 16; ++i)
+      {
+        w[i] = uint32_t(p[4 * i]) << 24 | uint32_t(p[4 * i + 1]) << 16 | uint32_t(p[4 * i + 2]) << 8 |
+               uint32_t(p[4 * i + 3]);
+      }
+      for (int i = 16; i < 80; ++i)
+      {
+        w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+      }
+      uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
+      for (int i = 0; i < 80; ++i)
+      {
+        uint32_t f, k;
+        if (i < 20)
+        {
+          f = (b & c) | (~b & d);
+          k = 0x5A827999u;
+        }
+        else if (i < 40)
+        {
+          f = b ^ c ^ d;
+          k = 0x6ED9EBA1u;
+        }
+        else if (i < 60)
+        {
+          f = (b & c) | (b & d) | (c & d);
+          k = 0x8F1BBCDCu;
+        }
+        else
+        {
+          f = b ^ c ^ d;
+          k = 0xCA62C1D6u;
+        }
+        const uint32_t t = rotl(a, 5) + f + e + k + w[i];
+        e = d;
+        d = c;
+        c = rotl(b, 30);
+        b = a;
+        a = t;
+      }
+      h[0] += a;
+      h[1] += b;
+      h[2] += c;
+      h[3] += d;
+      h[4] += e;
+    };
+    std::vector<unsigned char> buffer(1 << 16);
+    unsigned char tail[128];
+    size_t tail_len = 0;
+    uint64_t total = 0;
+    while (in)
+    {
+      in.read(reinterpret_cast<char *>(buffer.data()), std::streamsize(buffer.size()));
+      const size_t n = size_t(in.gcount());
+      total += n;
+      size_t i = 0;
+      while (tail_len && i < n && tail_len < 64)
+      {
+        tail[tail_len++] = buffer[i++];
+      }
+      if (tail_len == 64)
+      {
+        block(tail);
+        tail_len = 0;
+      }
+      for (; i + 64 <= n; i += 64)
+      {
+        block(&buffer[i]);
+      }
+      for (; i < n; ++i)
+      {
+        tail[tail_len++] = buffer[i];
+      }
+    }
+    tail[tail_len++] = 0x80;
+    if (tail_len > 56)
+    {
+      while (tail_len < 64)
+      {
+        tail[tail_len++] = 0;
+      }
+      block(tail);
+      tail_len = 0;
+    }
+    while (tail_len < 56)
+    {
+      tail[tail_len++] = 0;
+    }
+    const uint64_t bits = total * 8;
+    for (int i = 7; i >= 0; --i)
+    {
+      tail[tail_len++] = static_cast<unsigned char>(bits >> (8 * i));
+    }
+    block(tail);
+    static const char kHex[] = "0123456789abcdef";
+    for (uint32_t v : h)
+    {
+      for (int shift = 28; shift >= 0; shift -= 4)
+      {
+        result += kHex[(v >> shift) & 0xF];
+      }
+    }
 #endif
     return result;
   }
@@ -454,10 +635,25 @@ namespace vp_launcher
     const char *optimizations;    // edram_interlock_optimizations
     const char *vulkan_immediate; // vulkan_allow_present_mode_immediate
   };
+#if defined(_WIN32)
   inline constexpr RenderMode kRenderModes[] = {
       {"d3d12", "rtv", "", "fast", "false", "false", "true"},     // fast
       {"vulkan", "rov", "fsi", "lazy", "true", "true", "false"},  // accurate
   };
+#else
+  // Linux has no Direct3D 12: Fast is Vulkan with host render targets (FBO)
+  // and fast readback, so both modes share the API and never restart.
+  inline constexpr RenderMode kRenderModes[] = {
+      {"vulkan", "rtv", "fbo", "fast", "false", "false", "true"},  // fast
+      {"vulkan", "rov", "fsi", "lazy", "true", "true", "false"},   // accurate
+  };
+#endif
+  inline constexpr const char *kDefaultBackend =
+#if defined(_WIN32)
+      "d3d12";
+#else
+      "vulkan";
+#endif
 
   // Writes a render mode to launcher.toml; apply_now also sets the cvars (they
   // must all be registered then, i.e. the GPU plugin is loaded).
@@ -523,7 +719,7 @@ namespace vp_launcher
   }
   inline std::string NormalizedBackend(std::string backend)
   {
-    return (backend.empty() || backend == "any") ? std::string("d3d12") : backend;
+    return (backend.empty() || backend == "any") ? std::string(kDefaultBackend) : backend;
   }
 
   // Starts the game again with the same command line, without the launcher
@@ -551,7 +747,34 @@ namespace vp_launcher
     CloseHandle(process_info.hProcess);
     return true;
 #else
-    return false;
+    // Same command line from /proc/self/cmdline, plus the flag; the child is
+    // a new process (fork + exec) and the caller closes this one.
+    std::ifstream cmdline("/proc/self/cmdline", std::ios::binary);
+    std::vector<std::string> args;
+    for (std::string arg; std::getline(cmdline, arg, '\0');)
+    {
+      args.push_back(arg);
+    }
+    args.push_back("--vp_show_launcher=false");
+    std::vector<char *> argv;
+    for (std::string &arg : args)
+    {
+      argv.push_back(arg.data());
+    }
+    argv.push_back(nullptr);
+    const pid_t pid = fork();
+    if (pid < 0)
+    {
+      REXLOG_ERROR("launcher: restart failed (fork)");
+      return false;
+    }
+    if (pid == 0)
+    {
+      setsid();
+      execv("/proc/self/exe", argv.data());
+      _exit(127);
+    }
+    return true;
 #endif
   }
 
@@ -626,7 +849,7 @@ namespace vp_launcher
       .resolution = "Render resolution",
       .scale = {"×1 — 1280×720, like the Xbox 360", "×2 — 2560×1440", "×3 — 3840×2160"},
       .render_mode = "Render mode",
-      .path = {"Fast (D3D12, RTV) — full speed, slightly less accurate",
+      .path = {"Fast (" VP_FAST_API ", RTV) — full speed, slightly less accurate",
                "Accurate (Vulkan, exact EDRAM) — the exact Xbox 360 picture"},
       .path_note = "Accurate emulates the Xbox 360 video memory exactly and needs a stronger GPU (an RX 6600 "
                    "holds the game's 30 FPS). Changing between the modes restarts the game once.",
@@ -664,7 +887,7 @@ namespace vp_launcher
       .resolution = "Разрешение рендера",
       .scale = {"×1 — 1280×720, как на Xbox 360", "×2 — 2560×1440", "×3 — 3840×2160"},
       .render_mode = "Режим рендера",
-      .path = {"Быстрый (D3D12, RTV) — полная скорость, чуть менее точный",
+      .path = {"Быстрый (" VP_FAST_API ", RTV) — полная скорость, чуть менее точный",
                "Точный (Vulkan, точная EDRAM) — картинка как на Xbox 360"},
       .path_note = "Точный режим в точности эмулирует видеопамять Xbox 360 и требует видеокарту мощнее "
                    "(RX 6600 держит игровые 30 кадров/с). При смене режима игра один раз перезапустится.",
@@ -680,6 +903,13 @@ namespace vp_launcher
 #if defined(_WIN32)
     return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN;
 #else
+    for (const char *name : {"LC_ALL", "LC_MESSAGES", "LANG"})
+    {
+      if (const char *value = std::getenv(name); value && *value)
+      {
+        return std::string_view(value).substr(0, 2) == "ru";
+      }
+    }
     return false;
 #endif
   }
