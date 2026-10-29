@@ -10,7 +10,20 @@
 //               alone never grabs it, so it can leave the window freely)
 #pragma once
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <Xinput.h>
+#pragma comment(lib, "xinput.lib")
+#else
 #include <SDL3/SDL.h>
+#endif
+
 #include <imgui.h>
 
 #include <rex/cvar.h>
@@ -25,7 +38,7 @@ namespace vp_input
   {
   public:
     explicit InputModeWatcher(rex::ui::ImGuiDrawer *drawer)
-        : rex::ui::ImGuiDialog(drawer), pad_last_(SDL_HasGamepad())
+        : rex::ui::ImGuiDialog(drawer), pad_last_(GamepadConnected())
     {
     }
 
@@ -59,9 +72,48 @@ namespace vp_input
     }
 
   private:
-    // Any button, or a stick / trigger past a dead zone, on any open gamepad.
+    // A gamepad is plugged in at startup: auto starts with the mouse free.
+    static bool GamepadConnected()
+    {
+#if defined(_WIN32)
+      for (DWORD user = 0; user < XUSER_MAX_COUNT; ++user)
+      {
+        XINPUT_STATE state{};
+        if (XInputGetState(user, &state) == ERROR_SUCCESS)
+        {
+          return true;
+        }
+      }
+      return false;
+#else
+      return SDL_HasGamepad();
+#endif
+    }
+
+    // Any button, or a stick / trigger past a dead zone, on any gamepad.
+    // Windows reads XInput (the game's input backend there, as the F1 Back
+    // hold in vp_tools does); elsewhere SDL, the input backend on Linux.
     static bool GamepadUsed()
     {
+#if defined(_WIN32)
+      for (DWORD user = 0; user < XUSER_MAX_COUNT; ++user)
+      {
+        XINPUT_STATE state{};
+        if (XInputGetState(user, &state) != ERROR_SUCCESS)
+        {
+          continue;
+        }
+        const XINPUT_GAMEPAD &g = state.Gamepad;
+        auto stick = [](SHORT v) { return v > 12000 || v < -12000; };
+        if (g.wButtons != 0 || g.bLeftTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD ||
+            g.bRightTrigger > XINPUT_GAMEPAD_TRIGGER_THRESHOLD || stick(g.sThumbLX) ||
+            stick(g.sThumbLY) || stick(g.sThumbRX) || stick(g.sThumbRY))
+        {
+          return true;
+        }
+      }
+      return false;
+#else
       int count = 0;
       SDL_JoystickID *ids = SDL_GetGamepads(&count);
       bool used = false;
@@ -85,6 +137,7 @@ namespace vp_input
       }
       SDL_free(ids);
       return used;
+#endif
     }
 
     // A click in the game window (not on an ImGui window) or a default game
