@@ -1,6 +1,6 @@
 # game dump (5.2 GB) - never commit; keep only the notes
-game_files/*
-!game_files/README.md
+# Extracted disc (or a link to it); never committed.
+/game_files
 # codegen output is rebuilt by Visual Studio; only the SDK glue is tracked
 generated/*
 !generated/rexglue.cmake
