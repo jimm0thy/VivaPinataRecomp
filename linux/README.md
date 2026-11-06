@@ -26,10 +26,11 @@ linux/build-linux.sh "/path/to/Viva Pinata (USA, Europe).iso"
 ```
 
 The first run extracts the disc into `game_files/`, clones and builds the
-ReXGlue SDK fork (`crabinacrabic/rexglue-sdk` at `717fbdf`, which only ships
-Windows builds) into `rexglue/`, applies the Linux fixes in `sdk-patches/`,
-runs the code generator and builds the game. That takes a while; later runs
-only rebuild what changed. Everything stays inside the repository folder
+ReXGlue SDK fork the Windows build pins (`crabinacrabic/rexglue-sdk-RED-Edition-LAVA`
+at `8fdf638`; it only publishes Windows builds) into `rexglue/`, applies the
+Linux fixes in `sdk-patches/`, runs the code generator and builds the game.
+That takes a while; later runs only rebuild what changed, and when the
+project moves to a newer SDK the script updates and rebuilds it by itself. Everything stays inside the repository folder
 (all of it git-ignored), and every run writes a log to `out/build-logs/`.
 
 - `linux/build-linux.sh` without an argument looks for a single `.iso` in the

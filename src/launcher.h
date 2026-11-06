@@ -20,12 +20,17 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <thread>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -66,6 +71,7 @@
 #include <rex/version.h>
 
 #include "game_cvars.h"
+#include "vulkan_fsi_probe.h"
 
 namespace vp_launcher
 {
@@ -829,6 +835,8 @@ namespace vp_launcher
     const char *path_note;
     const char *anisotropic;
     const char *anisotropic_levels[6];
+    const char *fsi_no_vulkan;
+    const char *fsi_no_interlock;  // %s: the GPU name
     const char *precise_timer;
     const char *controls;
     const char *controls_mode[3];
@@ -871,6 +879,9 @@ namespace vp_launcher
                    "holds the game's 30 FPS). Changing between the modes restarts the game once.",
       .anisotropic = "Anisotropic filtering",
       .anisotropic_levels = {"Game default", "Off", "2x", "4x", "8x", "16x"},
+      .fsi_no_vulkan = "No Vulkan on this PC: Accurate would run on Direct3D 12, much slower. Choose Fast instead.",
+      .fsi_no_interlock = "%s has no fragment shader interlock: Accurate would run on Vulkan without the exact "
+                          "EDRAM emulation. Choose Fast instead.",
       .precise_timer = "Precise system timer (1 ms)",
       .controls = "Controls (mouse capture)",
       .controls_mode = {"Auto: release the mouse when a controller is used", "Keyboard + mouse",
@@ -914,6 +925,10 @@ namespace vp_launcher
                    "(RX 6600 держит игровые 30 кадров/с). При смене режима игра один раз перезапустится.",
       .anisotropic = "Анизотропная фильтрация",
       .anisotropic_levels = {"Как в игре", "Выкл", "2x", "4x", "8x", "16x"},
+      .fsi_no_vulkan = "Vulkan на этом ПК не найден: «Точный» пойдёт через Direct3D 12, намного медленнее. "
+                       "Лучше выберите «Быстрый».",
+      .fsi_no_interlock = "%s не поддерживает fragment shader interlock: в «Точном» игра пойдёт на Vulkan без "
+                          "точной эмуляции EDRAM. Лучше выберите «Быстрый».",
       .precise_timer = "Точный системный таймер (1 мс)",
       .controls = "Управление (захват мыши)",
       .controls_mode = {"Авто: отпускать мышь при игре на геймпаде", "Клавиатура + мышь",
@@ -1246,6 +1261,33 @@ namespace vp_launcher
       return rex::cvar::Query<std::string>("render_target_path_d3d12") == "rov" ? 1 : 0;
     }
 
+    // Whether Accurate can work on this PC (vulkan_fsi_probe.h). Started the
+    // first time the settings are drawn, so players who never open them don't
+    // load the Vulkan driver; nullptr until the worker thread is done. The
+    // thread is detached: PLAY or Quit never waits for a slow driver.
+    const VulkanFsiProbe *FsiProbe()
+    {
+      if (!fsi_probe_slot_)
+      {
+        // An unregistered cvar reads as "" - automatic device selection then.
+        const std::string device = rex::cvar::Query<std::string>("vulkan_device");
+        const int32_t device_index = device.empty() ? -1 : std::atoi(device.c_str());
+        fsi_probe_slot_ = std::make_shared<FsiProbeSlot>();
+        std::thread([slot = fsi_probe_slot_, device_index] {
+          slot->probe = ProbeVulkanFsi(device_index);
+          slot->done.store(true, std::memory_order_release);
+        }).detach();
+      }
+      if (!fsi_probe_ && fsi_probe_slot_->done.load(std::memory_order_acquire))
+      {
+        fsi_probe_ = fsi_probe_slot_->probe;
+        static constexpr const char *kResultNames[] = {"unknown", "no Vulkan", "no interlock", "supported"};
+        REXLOG_INFO("launcher: Vulkan FSI probe: {} ({})", kResultNames[int(fsi_probe_->result)],
+                    fsi_probe_->device);
+      }
+      return fsi_probe_ ? &*fsi_probe_ : nullptr;
+    }
+
     void DrawOptions(ImGuiIO &io)
     {
       if (!options_open_)
@@ -1324,13 +1366,33 @@ namespace vp_launcher
         }
 #else
         // Linux: Fast (Vulkan host render targets) loses the device on NVIDIA
-        // in the intro movie, so only Accurate is offered.
+        // in the intro movie, so only Accurate is offered. (The FSI probe
+        // below reports kUnknown on Linux, so it shows no warning.)
+        const int mode = 1;
         ImGui::TextDisabled("%s", ui.path[1]);
 #endif
         {
           FontScope caption(fonts.caption);
           ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + kModeWidth);
           ImGui::TextDisabled("%s", ui.path_note);
+          const VulkanFsiProbe *probe = FsiProbe();
+          if (mode == 1 && probe &&
+              (probe->result == VulkanFsiProbe::Result::kNoVulkan ||
+               probe->result == VulkanFsiProbe::Result::kNoInterlock))
+          {
+            char warning[512];
+            if (probe->result == VulkanFsiProbe::Result::kNoVulkan)
+            {
+              std::snprintf(warning, sizeof(warning), "%s", ui.fsi_no_vulkan);
+            }
+            else
+            {
+              std::snprintf(warning, sizeof(warning), ui.fsi_no_interlock, probe->device.c_str());
+            }
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(kStatusWarn));
+            ImGui::TextUnformatted(warning);
+            ImGui::PopStyleColor();
+          }
           ImGui::PopTextWrapPos();
         }
         // anisotropic_override: -1 game default, 0 off, 1 = 1x (same as off),
@@ -1409,5 +1471,12 @@ namespace vp_launcher
     bool textures_loaded_ = false;
     bool options_open_ = false;
     bool done_ = false;
+    struct FsiProbeSlot
+    {
+      std::atomic<bool> done{false};
+      VulkanFsiProbe probe;  // written by the probe thread before done
+    };
+    std::shared_ptr<FsiProbeSlot> fsi_probe_slot_;
+    std::optional<VulkanFsiProbe> fsi_probe_;
   };
 } // namespace vp_launcher

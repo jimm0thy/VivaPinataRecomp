@@ -42,6 +42,10 @@ namespace vp_input
     {
     }
 
+    // Draws nothing; checking once per game frame is often enough, so it
+    // never forces repaints at the display rate (smoother guest frames).
+    bool NeedsContinuousRepaint() const override { return false; }
+
   protected:
     void OnDraw(ImGuiIO &io) override
     {

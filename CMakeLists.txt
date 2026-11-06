@@ -31,12 +31,12 @@ else()
 endif()
 
 if(REXSDK_PLATFORM STREQUAL "win-amd64")
-    # Our build of ReXGlue (fork crabinacrabic/rexglue-sdk, branch
+    # Our build of ReXGlue (fork crabinacrabic/rexglue-sdk-RED-Edition-LAVA, branch
     # rov-research): the exact Vulkan EDRAM speedups of the launcher's Accurate
     # mode and lazy readback. Only win-amd64 is built.
-    set(REXSDK_VERSION "0.10.0.24-dev.g717fbdf")
+    set(REXSDK_VERSION "0.10.0.30-dev.g8fdf638")
     set(REXSDK_RELEASE_URL
-        "https://github.com/crabinacrabic/rexglue-sdk/releases/download/accurate-edram-20261016-717fbdf")
+        "https://github.com/crabinacrabic/rexglue-sdk-RED-Edition-LAVA/releases/download/red-edition-lava-20261102-8fdf638")
 else()
     # The upstream nightly the project was scaffolded with (no Accurate mode).
     set(REXSDK_VERSION "0.10.0.8-dev.g1406e1b")
@@ -50,7 +50,7 @@ if(REXSDK_RELEASE_URL_OVERRIDE)
 endif()
 
 # Linux port: the fork publishes no Linux SDK, so build-linux.sh builds the
-# same fork commit (717fbdf) from source and installs it into
+# same fork commit (linux/build-linux.sh, SDK_COMMIT) from source and installs it into
 # rexglue/<platform>, leaving a marker file. With the marker present, that
 # SDK is used as is and nothing is downloaded.
 set(REXSDK_LOCAL_MARKER "${CMAKE_CURRENT_SOURCE_DIR}/rexglue/${REXSDK_PLATFORM}/.vp-source-build")

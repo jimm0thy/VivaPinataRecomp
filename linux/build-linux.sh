@@ -21,8 +21,9 @@ LINUX_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(dirname "$LINUX_DIR")"
 SDK_SRC="${VP_SDK_SRC:-$PROJECT/rexglue/sdk-src}"
 SDK_PREFIX="$PROJECT/rexglue/linux-amd64"
-SDK_REPO="https://github.com/crabinacrabic/rexglue-sdk.git"
-SDK_COMMIT="717fbdf"   # accurate-edram-20261016-717fbdf, what the Windows build pins
+# The SDK the Windows build pins (CMakeLists.txt, REXSDK_VERSION / release URL).
+SDK_REPO="https://github.com/crabinacrabic/rexglue-sdk-RED-Edition-LAVA.git"
+SDK_COMMIT="8fdf638"   # red-edition-lava-20261102-8fdf638
 PRESET="local-lin-relwithdebinfo"
 BUILD_DIR="$PROJECT/out/build/$PRESET"
 XEX_SHA1="130dbbe05328eeca23ab830bc8ed3337064eddd3"
@@ -102,15 +103,25 @@ echo "default.xex OK (Viva Pinata USA/Europe, 4D5307F2)"
 
 # --- 3. ReXGlue SDK fork from source -------------------------------------------
 # The fork publishes Windows SDK builds only, so the same commit is built here.
+# The marker written after an SDK build starts with "<repo> <commit>"; a
+# different commit (the project moved to a newer SDK) checks out and rebuilds.
 sdk_needs_build=0
-if [[ ! -f "$SDK_PREFIX/.vp-source-build" ]]; then
-  step "Getting the ReXGlue SDK fork ($SDK_COMMIT)"
+sdk_built="$(cut -d' ' -f2 "$SDK_PREFIX/.vp-source-build" 2>/dev/null || true)"
+if [[ "$sdk_built" != "$SDK_COMMIT" ]]; then
+  if [[ -n "$sdk_built" ]]; then
+    step "Updating the ReXGlue SDK fork ($sdk_built -> $SDK_COMMIT)"
+  else
+    step "Getting the ReXGlue SDK fork ($SDK_COMMIT)"
+  fi
   if [[ ! -d "$SDK_SRC/.git" ]]; then
     git clone "$SDK_REPO" "$SDK_SRC"
   fi
+  git -C "$SDK_SRC" remote set-url origin "$SDK_REPO"
   git -C "$SDK_SRC" fetch --tags origin
   git -C "$SDK_SRC" checkout -f "$SDK_COMMIT"
   git -C "$SDK_SRC" submodule update --init --recursive --jobs 8
+  # The code generator is rebuilt from the new source below.
+  rm -f "$SDK_PREFIX/bin/rexglue" "$SDK_PREFIX/.vp-source-build"
   sdk_needs_build=1
 fi
 
@@ -138,7 +149,7 @@ if ((sdk_needs_build)); then
   # finds it by path, so remove the entry to keep nothing outside the repo.
   reg="$HOME/.cmake/packages/rexglue/$(printf '%s' "$SDK_PREFIX" | md5sum | cut -d' ' -f1)"
   rm -f "$reg"
-  printf 'crabinacrabic/rexglue-sdk %s (%s)\n' "$SDK_COMMIT" "$(git -C "$SDK_SRC" describe --tags --always)" \
+  printf '%s %s (%s)\n' "$(basename "$SDK_REPO" .git)" "$SDK_COMMIT" "$(git -C "$SDK_SRC" describe --tags --always)" \
     > "$SDK_PREFIX/.vp-source-build"
 fi
 echo "SDK: $(cat "$SDK_PREFIX/.vp-source-build")"
